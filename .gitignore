@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+
+frontend/node_modules/
+frontend/dist/
+
+benchmarks/results/
+
+backend/data/source/*
+!backend/data/source/.gitkeep
+
+.env
+.env.*
+!.env.example

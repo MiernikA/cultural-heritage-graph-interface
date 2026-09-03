@@ -1,0 +1,85 @@
+@import url("https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Roboto", "Helvetica", "Arial", sans-serif;
+  --font-serif: var(--font-sans);
+  --color-heritage-ink: #26231f;
+  --color-heritage-heading: #201d1a;
+  --color-heritage-muted: #625d52;
+  --color-heritage-canvas: #f3efe5;
+  --color-heritage-panel: #fffaf0;
+  --color-heritage-green: #2f6d50;
+  --color-heritage-green-bright: #2f7d59;
+  --radius-ui: 8px;
+}
+
+:root {
+  --font-title: var(--font-serif);
+  --font-body: var(--font-sans);
+  --weight-body: 400;
+  --weight-badge: 500;
+  --weight-button: 500;
+  --weight-subtitle: 600;
+
+  color-scheme: light;
+  color: var(--color-heritage-ink);
+  background: var(--color-heritage-canvas);
+  font-family: var(--font-body);
+  font-weight: var(--weight-body);
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, rgba(255, 252, 244, 0.9) 0%, rgba(243, 239, 229, 1) 42%, rgba(232, 229, 216, 1) 100%);
+}
+
+button,
+input,
+select {
+  font-family: var(--font-body);
+}
+
+button {
+  cursor: pointer;
+  font-weight: var(--weight-button);
+}
+
+h1 {
+  margin: 0;
+  color: var(--color-heritage-heading);
+  font-family: var(--font-title);
+  font-size: 31px;
+  line-height: 1.04;
+  font-weight: 600;
+}
+
+h2 {
+  margin: 0 0 6px;
+  color: #25211d;
+  font-family: var(--font-title);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+h3 {
+  margin: 0 0 6px;
+  color: #34413d;
+  font-size: 15px;
+  font-weight: var(--weight-subtitle);
+}
+
+p {
+  margin: 4px 0 0;
+  color: var(--color-heritage-muted);
+  font-weight: var(--weight-body);
+}
+
