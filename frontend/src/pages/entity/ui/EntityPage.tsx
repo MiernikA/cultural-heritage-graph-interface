@@ -9,6 +9,8 @@ import { isDisplayableAlias, resolveAliasTarget } from "../model/alias";
 import { StagedRecommendationPanel } from "./RecommendationPanel";
 import { RelationshipList } from "./RelationshipList";
 import { TechnicalGraphDetailsPanel } from "./TechnicalGraphDetailsPanel";
+import { recommendationReasonLabel } from "./recommendation-logic";
+import type { TFunction } from "@/shared/i18n";
 
 type EntityTab = "map" | "list" | "recommendations" | "technical";
 
@@ -276,10 +278,10 @@ function TechnicalDetailsTab({
             <strong>{t("technicalRecommendationMetadata")}</strong>
             <div className="technical-badge-list">
               {retrievalOrigins.map((origin) => (
-                <span key={origin}>{origin}</span>
+                <span key={origin}>{translatedRetrievalOrigin(origin, t)}</span>
               ))}
               {recommendationReasonTags.map((tag) => (
-                <span key={tag}>{tag}</span>
+                <span key={tag}>{recommendationReasonLabel(tag, t)}</span>
               ))}
               {retrievalOrigins.length === 0 && recommendationReasonTags.length === 0 && (
                 <em>{t("technicalNoRecommendationMetadata")}</em>
@@ -290,4 +292,14 @@ function TechnicalDetailsTab({
       </details>
     </section>
   );
+}
+
+function translatedRetrievalOrigin(origin: Recommendation["retrieval_origin"], t: TFunction) {
+  if (origin === "Direct embedding retrieval") {
+    return t("recommendation.origin.directEmbedding");
+  }
+  if (origin === "Technical embedding expansion") {
+    return t("recommendation.origin.technicalExpansion");
+  }
+  return origin;
 }

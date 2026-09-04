@@ -30,21 +30,25 @@ class Settings:
 
 @lru_cache
 def get_settings() -> Settings:
+    source_data_dir = Path(os.getenv("KG_SOURCE_DATA_DIR", SOURCE_DATA_DIR))
     return Settings(
-        graph_tsv_path=Path(os.getenv("KG_GRAPH_TSV_PATH", SOURCE_DATA_DIR / "graph_all_cac.tsv")),
-        ontology_rdf_path=Path(os.getenv("KG_ONTOLOGY_RDF_PATH", SOURCE_DATA_DIR / "chexrish_onto_prototype2.rdf")),
+        graph_tsv_path=Path(os.getenv("KG_GRAPH_TSV_PATH", source_data_dir / "graph_all_cac.tsv")),
+        ontology_rdf_path=Path(os.getenv("KG_ONTOLOGY_RDF_PATH", source_data_dir / "chexrish_onto_prototype2.rdf")),
         max_relationships_per_direction=int(os.getenv("KG_MAX_RELATIONSHIPS_PER_DIRECTION", "250")),
         recommendation_entity_to_id_path=_artifact_path(
             os.getenv("KG_RECOMMENDATION_ENTITY_TO_ID_PATH"),
             "complex_entity_to_id_all_cac.pkl",
+            source_data_dir,
         ),
         recommendation_embeddings_path=_artifact_path(
             os.getenv("KG_RECOMMENDATION_EMBEDDINGS_PATH"),
             "complex_embeddings_all_cac.pkl",
+            source_data_dir,
         ),
         recommendation_index_path=_artifact_path(
             os.getenv("KG_RECOMMENDATION_INDEX_PATH"),
             "hnsw_index_complex_model_all_cac.bin",
+            source_data_dir,
         ),
         recommendation_embedding_dim=int(os.getenv("KG_RECOMMENDATION_EMBEDDING_DIM", "400")),
         recommendation_index_space=os.getenv("KG_RECOMMENDATION_INDEX_SPACE", "ip"),
@@ -52,10 +56,10 @@ def get_settings() -> Settings:
     )
 
 
-def _artifact_path(override: str | None, filename: str) -> Path:
+def _artifact_path(override: str | None, filename: str, source_data_dir: Path) -> Path:
     if override:
         return Path(override)
-    return SOURCE_DATA_DIR / filename
+    return source_data_dir / filename
 
 
 def _csv_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
