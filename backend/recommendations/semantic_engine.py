@@ -87,7 +87,7 @@ CATALOG_RECORD_LABELS = frozenset({"cac rekord", "cac record"})
 
 
 @dataclass(frozen=True, slots=True)
-class OriginalCandidate:
+class SemanticRecommendationCandidate:
     embedding_id: int
     uri: str
     label: str
@@ -107,12 +107,12 @@ class RetrievedCandidate:
     source_embedding_id: int
 
 
-class OriginalPipelineEngine:
+class SemanticRecommendationEngine:
     def __init__(self, graph: KnowledgeGraph, artifacts: RecommendationArtifacts) -> None:
         self.graph = graph
         self.artifacts = artifacts
 
-    def recommend(self, uri: str, candidate_limit: int = 500) -> list[OriginalCandidate]:
+    def recommend(self, uri: str, candidate_limit: int = 500) -> list[SemanticRecommendationCandidate]:
         main_uri = self.graph.canonical_uri(uri)
         embedding_ids = self.embedding_ids_for_uri(main_uri)
         if not embedding_ids:
@@ -152,7 +152,7 @@ class OriginalPipelineEngine:
 
         reasons_by_uri, paths_by_uri = self.recommend_with_semantic_filters(main_uri, list(best_by_uri))
         recommendations = [
-            OriginalCandidate(
+            SemanticRecommendationCandidate(
                 embedding_id=candidate.embedding_id,
                 uri=candidate.uri,
                 label=candidate.label,
@@ -219,7 +219,7 @@ class OriginalPipelineEngine:
 
     def embedding_ids_for_uri(self, uri: str) -> list[int]:
         embedding_ids = self.canonical_embedding_ids_by_uri.get(self.graph.canonical_uri(uri), [])
-        return [embedding_ids[-1]] if embedding_ids else []
+        return list(embedding_ids)
 
     @cached_property
     def canonical_embedding_ids_by_uri(self) -> dict[str, list[int]]:
@@ -696,27 +696,41 @@ def _merge_retrieved(existing: RetrievedCandidate | None, incoming: RetrievedCan
     return incoming if incoming.distance < existing.distance else existing
 
 
-def _rank_recommendations(recommendations: list[OriginalCandidate]) -> list[OriginalCandidate]:
+def _rank_recommendations(recommendations: list[SemanticRecommendationCandidate]) -> list[SemanticRecommendationCandidate]:
     nearest = sorted(recommendations, key=_distance_rank_key)
-    nearest_uris = {candidate.uri for candidate in nearest[:2]}
+    explainable = [candidate for candidate in nearest if _has_explanatory_reason(candidate)]
+    fallback_only = [candidate for candidate in nearest if not _has_explanatory_reason(candidate)]
+
+    nearest_top = [*explainable[:2], *fallback_only[: max(0, 2 - len(explainable))]]
+    nearest_uris = {candidate.uri for candidate in nearest_top}
     richer = sorted(
-        [candidate for candidate in recommendations if candidate.uri not in nearest_uris],
+        [candidate for candidate in explainable if candidate.uri not in nearest_uris],
         key=_semantic_rank_key,
     )
-    top_four = [*nearest[:2], *richer[:2]]
+    fallback_richer = sorted(
+        [candidate for candidate in fallback_only if candidate.uri not in nearest_uris],
+        key=_semantic_rank_key,
+    )
+    top_four = [*nearest_top, *richer[: max(0, 4 - len(nearest_top))]]
+    if len(top_four) < 4:
+        top_four.extend(fallback_richer[: 4 - len(top_four)])
     top_four_uris = {candidate.uri for candidate in top_four}
     remainder = [candidate for candidate in nearest if candidate.uri not in top_four_uris]
     return [*top_four, *remainder]
 
 
-def _distance_rank_key(candidate: OriginalCandidate) -> tuple[float, int, str]:
+def _distance_rank_key(candidate: SemanticRecommendationCandidate) -> tuple[float, int, str]:
     return (candidate.distance, candidate.hnsw_rank, candidate.label.casefold())
 
 
-def _semantic_rank_key(candidate: OriginalCandidate) -> tuple[int, int, float, int, str]:
+def _semantic_rank_key(candidate: SemanticRecommendationCandidate) -> tuple[int, int, float, int, str]:
     explanation_reasons = [reason for reason in candidate.recommendation_reason if reason != "person_or_actor"]
     evidence_count = sum(len(paths) for reason, paths in candidate.rdf_paths_by_reason.items() if reason != "person_or_actor")
     return (-len(explanation_reasons), -evidence_count, candidate.distance, candidate.hnsw_rank, candidate.label.casefold())
+
+
+def _has_explanatory_reason(candidate: SemanticRecommendationCandidate) -> bool:
+    return any(reason != "person_or_actor" for reason in candidate.recommendation_reason)
 
 
 def _dedupe_ints(values: list[int]) -> list[int]:

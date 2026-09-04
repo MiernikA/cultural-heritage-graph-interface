@@ -19,9 +19,10 @@ class BackendDataStore:
 def load_backend_data(settings: Settings) -> BackendDataStore:
     ontology = load_ontology(settings.ontology_rdf_path)
     graph = load_graph_from_tsv(settings.graph_tsv_path)
+    graph_subjects = set(graph.nodes)
 
     for subject, predicate, obj in ontology_label_triples(ontology):
-        if subject not in graph.nodes:
+        if subject not in graph_subjects:
             graph.add_triple(subject, predicate, obj)
 
     return BackendDataStore(

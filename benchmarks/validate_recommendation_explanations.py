@@ -22,9 +22,9 @@ from backend.api.application import build_application_context
 from backend.config import get_settings
 from backend.data.graph.constants import CIDOC
 from backend.data.schemas import Recommendation
-from backend.recommendations.original_pipeline import (
+from backend.recommendations.semantic_engine import (
     EVENT_TYPES,
-    OriginalCandidate,
+    SemanticRecommendationCandidate,
     OBJECT_TYPES,
     PLACE_TYPES,
     RetrievedCandidate,
@@ -135,7 +135,7 @@ def main() -> int:
     print("Loading application context...")
     context = build_application_context(get_settings())
     service = context.recommendations
-    engine = service.original_pipeline
+    engine = service.semantic_engine
     graph = service.filter.graph
 
     all_sources = discover_source_entities(service)
@@ -228,7 +228,7 @@ def main() -> int:
 
 
 def discover_source_entities(service: Any) -> list[SourceEntity]:
-    engine = service.original_pipeline
+    engine = service.semantic_engine
     sources: list[SourceEntity] = []
     for uri in sorted(service.filter.graph.nodes):
         canonical_uri = service.filter.graph.canonical_uri(uri)
@@ -277,7 +277,7 @@ def select_sample(sources: list[SourceEntity], sample_size: int, seed: int, use_
 
 
 def analyze_source(source: SourceEntity, service: Any, candidate_limit: int) -> tuple[dict[str, Any], list[CandidateTrace]]:
-    engine = service.original_pipeline
+    engine = service.semantic_engine
     main_uri = service.filter.graph.canonical_uri(source.uri)
     embedding_ids = engine.embedding_ids_for_uri(main_uri)
     if not embedding_ids:
@@ -362,8 +362,8 @@ def analyze_source(source: SourceEntity, service: Any, candidate_limit: int) -> 
 
     semantic_candidate_uris = list(best_by_uri)
     reasons_by_uri, paths_by_uri = engine.recommend_with_semantic_filters(main_uri, semantic_candidate_uris)
-    originals = [
-        OriginalCandidate(
+    semantic_candidates = [
+        SemanticRecommendationCandidate(
             embedding_id=candidate.embedding_id,
             uri=candidate.uri,
             label=candidate.label,
@@ -375,8 +375,8 @@ def analyze_source(source: SourceEntity, service: Any, candidate_limit: int) -> 
         for candidate in best_by_uri.values()
         if reasons_by_uri.get(candidate.uri)
     ]
-    ranked_originals = _rank_recommendations(originals)
-    rank_order = {candidate.uri: order for order, candidate in enumerate(ranked_originals, start=1)}
+    ranked_semantic_candidates = _rank_recommendations(semantic_candidates)
+    rank_order = {candidate.uri: order for order, candidate in enumerate(ranked_semantic_candidates, start=1)}
 
     traces = [trace for trace in raw_seen if not trace.passed_mapping_filter]
     final_recommendations = 0
@@ -390,7 +390,7 @@ def analyze_source(source: SourceEntity, service: Any, candidate_limit: int) -> 
         raw_path_count = sum(len(paths) for paths in raw_paths_by_reason.values())
         recommendation = None
         if raw_reasons:
-            original = OriginalCandidate(
+            semantic_candidate = SemanticRecommendationCandidate(
                 embedding_id=candidate.embedding_id,
                 uri=candidate.uri,
                 label=candidate.label,
@@ -399,7 +399,7 @@ def analyze_source(source: SourceEntity, service: Any, candidate_limit: int) -> 
                 recommendation_reason=raw_reasons,
                 rdf_paths_by_reason=raw_paths_by_reason,
             )
-            recommendation = service._recommendation_for_original_candidate(main_uri, original)
+            recommendation = service._recommendation_for_semantic_candidate(main_uri, semantic_candidate)
 
         visible_reasons = visible_semantic_reason_types(recommendation)
         candidate_profile = service.semantics.profile_for(candidate.uri)
@@ -524,7 +524,7 @@ def build_summary(
         "script": str(Path(__file__).resolve()),
         "command_hint": "python benchmarks/validate_recommendation_explanations.py --sample-size 1000",
         "methodology": {
-            "pipeline_basis": "Existing OriginalPipelineEngine.recommend and RecommendationService._recommendation_for_original_candidate.",
+            "pipeline_basis": "Existing SemanticRecommendationEngine.recommend and RecommendationService._recommendation_for_semantic_candidate.",
             "hnsw_candidates": "Neighbors after source embedding removal and metadata presence check, before URI canonicalization/deduplication.",
             "semantic_analysis_candidates": "Canonical HTTP candidate URIs after deduplication by URI, exactly the URI list passed to recommend_with_semantic_filters.",
             "semantic_reason": "Any raw reason returned by recommend_with_semantic_filters, including filter-only person_or_actor because it is part of the real semantic filter stage.",

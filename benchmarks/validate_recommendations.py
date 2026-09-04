@@ -20,8 +20,8 @@ from backend.api.application import build_application_context
 from backend.config import get_settings
 from backend.data.graph.constants import CIDOC
 from backend.data.text import is_uri
-from backend.recommendations.original_pipeline import (
-    OriginalCandidate,
+from backend.recommendations.semantic_engine import (
+    SemanticRecommendationCandidate,
     RetrievedCandidate,
     _dedupe,
     _merge_retrieved,
@@ -80,7 +80,7 @@ def main() -> int:
     print("Loading application context and recommendation artifacts...")
     context = build_application_context(get_settings())
     service = context.recommendations
-    engine = service.original_pipeline
+    engine = service.semantic_engine
 
     all_sources = discover_sources(service)
     sources = select_sample(all_sources, args.sample_size, args.seed, args.all)
@@ -145,7 +145,7 @@ def main() -> int:
 
 
 def discover_sources(service: Any) -> list[SourceEntity]:
-    engine = service.original_pipeline
+    engine = service.semantic_engine
     sources: list[SourceEntity] = []
     for uri in sorted(service.filter.graph.nodes):
         canonical_uri = service.filter.graph.canonical_uri(uri)
@@ -191,7 +191,7 @@ def select_sample(sources: list[SourceEntity], sample_size: int, seed: int, use_
 
 def trace_recommendation_pipeline(source: SourceEntity, service: Any, candidate_limit: int) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     graph = service.filter.graph
-    engine = service.original_pipeline
+    engine = service.semantic_engine
     main_uri = graph.canonical_uri(source.uri)
     embedding_ids = engine.embedding_ids_for_uri(main_uri)
     if not embedding_ids:
@@ -255,8 +255,8 @@ def trace_recommendation_pipeline(source: SourceEntity, service: Any, candidate_
     semantic_input_uris = list(best_by_uri)
     reasons_by_uri, paths_by_uri = engine.recommend_with_semantic_filters(main_uri, semantic_input_uris)
     semantic_passed = [candidate for candidate in best_by_uri.values() if reasons_by_uri.get(candidate.uri)]
-    originals = [
-        OriginalCandidate(
+    semantic_candidates = [
+        SemanticRecommendationCandidate(
             embedding_id=candidate.embedding_id,
             uri=candidate.uri,
             label=candidate.label,
@@ -267,7 +267,7 @@ def trace_recommendation_pipeline(source: SourceEntity, service: Any, candidate_
         )
         for candidate in semantic_passed
     ]
-    ranked_originals = _rank_recommendations(originals)
+    ranked_semantic_candidates = _rank_recommendations(semantic_candidates)
 
     dedup_distance_order = {
         candidate.uri: index
@@ -275,7 +275,7 @@ def trace_recommendation_pipeline(source: SourceEntity, service: Any, candidate_
     }
     semantic_distance_order = {
         candidate.uri: index
-        for index, candidate in enumerate(sorted(originals, key=lambda item: (item.distance, item.hnsw_rank, item.label.casefold())), start=1)
+        for index, candidate in enumerate(sorted(semantic_candidates, key=lambda item: (item.distance, item.hnsw_rank, item.label.casefold())), start=1)
     }
 
     recommendation_rows: list[dict[str, Any]] = []
@@ -285,13 +285,13 @@ def trace_recommendation_pipeline(source: SourceEntity, service: Any, candidate_
     moved_count = 0
     top_n_from_beyond = 0
 
-    for final_rank, original in enumerate(ranked_originals, start=1):
-        recommendation = service._recommendation_for_original_candidate(main_uri, original)
+    for final_rank, semantic_candidate in enumerate(ranked_semantic_candidates, start=1):
+        recommendation = service._recommendation_for_semantic_candidate(main_uri, semantic_candidate)
         if recommendation is None:
-            final_filter_rejections[classify_final_filter_rejection(original.uri, main_uri, service)] += 1
+            final_filter_rejections[classify_final_filter_rejection(semantic_candidate.uri, main_uri, service)] += 1
             continue
-        raw_rank = dedup_distance_order.get(original.uri)
-        semantic_raw_rank = semantic_distance_order.get(original.uri)
+        raw_rank = dedup_distance_order.get(semantic_candidate.uri)
+        semantic_raw_rank = semantic_distance_order.get(semantic_candidate.uri)
         delta = (semantic_raw_rank or final_rank) - final_rank
         ranking_deltas.append(abs(delta))
         if semantic_raw_rank != final_rank:
@@ -299,8 +299,8 @@ def trace_recommendation_pipeline(source: SourceEntity, service: Any, candidate_
         if final_rank <= TOP_N_FOR_RANKING and semantic_raw_rank and semantic_raw_rank > TOP_N_FOR_RANKING:
             top_n_from_beyond += 1
 
-        evidence_path_count = sum(len(paths) for paths in original.rdf_paths_by_reason.values())
-        non_filter_reasons = [reason for reason in original.recommendation_reason if reason != "person_or_actor"]
+        evidence_path_count = sum(len(paths) for paths in semantic_candidate.rdf_paths_by_reason.values())
+        non_filter_reasons = [reason for reason in semantic_candidate.recommendation_reason if reason != "person_or_actor"]
         final_recommendations.append(recommendation)
         recommendation_rows.append(
             {
@@ -311,15 +311,15 @@ def trace_recommendation_pipeline(source: SourceEntity, service: Any, candidate_
                 "recommendation_label": recommendation.label,
                 "recommendation_semantic_type": recommendation.semantic_type,
                 "final_rank": final_rank,
-                "hnsw_rank": original.hnsw_rank,
+                "hnsw_rank": semantic_candidate.hnsw_rank,
                 "dedup_distance_rank": raw_rank,
                 "semantic_distance_rank": semantic_raw_rank,
                 "rank_delta_from_semantic_distance": delta,
-                "distance": f"{original.distance:.8f}",
+                "distance": f"{semantic_candidate.distance:.8f}",
                 "score": recommendation.score,
-                "semantic_reason_count": len(original.recommendation_reason),
+                "semantic_reason_count": len(semantic_candidate.recommendation_reason),
                 "non_filter_reason_count": len(non_filter_reasons),
-                "semantic_reasons": "|".join(original.recommendation_reason),
+                "semantic_reasons": "|".join(semantic_candidate.recommendation_reason),
                 "evidence_path_count": evidence_path_count,
                 "reason_tags": "|".join(recommendation.reason_tags),
             }
@@ -470,8 +470,9 @@ def build_summary(
         "avg_abs_position_delta_per_entity": round(statistics.mean([float(row["ranking_avg_abs_position_delta"]) for row in entity_rows if row["has_embedding"]]), 4) if with_embedding else 0.0,
         "top10_from_beyond_semantic_distance_top10": sum_int(entity_rows, "ranking_top10_from_beyond_hnsw_top10"),
         "ranking_rule": (
-            "OriginalPipelineEngine najpierw zachowuje 2 najblizsze kandydaty embeddingowe, "
-            "potem dobiera 2 kandydaty z najwieksza liczba powodow semantycznych i evidence paths, "
+            "SemanticRecommendationEngine najpierw zachowuje 2 najblizsze kandydaty embeddingowe "
+            "z wyjasnialnymi powodami semantycznymi, uzupelniajac fallbackami tylko przy braku opcji, "
+            "potem dobiera kandydaty z najwieksza liczba powodow semantycznych i evidence paths, "
             "a reszte uklada wedlug dystansu HNSW."
         ),
     }
@@ -485,7 +486,7 @@ def build_summary(
             "ground_truth_note": "Nie liczono Precision@K ani Recall@K; metryki opisuja dostepnosc i przeplyw pipeline'u.",
             "pipeline_order": [
                 "displayable canonical source",
-                "embedding_ids_for_uri returns last canonical embedding id",
+                "embedding_ids_for_uri returns all canonical embedding ids",
                 "HNSW knn_query",
                 "remove source embedding and missing metadata, slice candidate_limit",
                 "canonicalize URI/ref",

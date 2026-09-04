@@ -8,7 +8,7 @@ from backend.data.schemas import (
 from backend.recommendations.explainability import RecommendationExplainer
 from backend.recommendations.filters import RecommendationFilter
 from backend.recommendations.loader import RecommendationArtifacts
-from backend.recommendations.original_pipeline import OriginalCandidate, OriginalPipelineEngine
+from backend.recommendations.semantic_engine import SemanticRecommendationCandidate, SemanticRecommendationEngine
 from backend.data.label_resolver import LabelResolver
 from backend.data.semantic_resolver import SemanticResolver
 
@@ -30,15 +30,15 @@ class RecommendationService:
         self.semantics = semantics
         self.artifacts = artifacts
         self.filter = recommendation_filter
-        self.original_pipeline = OriginalPipelineEngine(self.filter.graph, self.artifacts)
+        self.semantic_engine = SemanticRecommendationEngine(self.filter.graph, self.artifacts)
         self.explainer = RecommendationExplainer(self.filter.graph, labels, semantics)
 
     def recommend_for_entity(self, uri: str, limit: int | None = None) -> list[Recommendation]:
         current_uri = self.filter.graph.canonical_uri(uri)
         recommendations = [
             recommendation
-            for item in self.original_pipeline.recommend(current_uri, DEFAULT_CANDIDATE_LIMIT)
-            for recommendation in [self._recommendation_for_original_candidate(current_uri, item)]
+            for item in self.semantic_engine.recommend(current_uri, DEFAULT_CANDIDATE_LIMIT)
+            for recommendation in [self._recommendation_for_semantic_candidate(current_uri, item)]
             if recommendation is not None
         ]
         return recommendations[:limit] if limit is not None else recommendations
@@ -46,7 +46,7 @@ class RecommendationService:
     def featured_recommendations_for_entity(self, uri: str) -> list[Recommendation]:
         return self.recommend_for_entity(uri, FEATURED_RECOMMENDATION_LIMIT)
 
-    def _recommendation_for_original_candidate(self, current_uri: str, item: OriginalCandidate) -> Recommendation | None:
+    def _recommendation_for_semantic_candidate(self, current_uri: str, item: SemanticRecommendationCandidate) -> Recommendation | None:
         recommendation = self.filter.build_recommendation_for_uri(current_uri, item.uri, round(item.distance * 100.0, 2))
         if not recommendation:
             return None
