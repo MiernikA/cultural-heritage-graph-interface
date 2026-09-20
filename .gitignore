@@ -5,8 +5,6 @@ __pycache__/
 frontend/node_modules/
 frontend/dist/
 
-benchmarks/results/
-
 backend/data/source/*
 !backend/data/source/.gitkeep
 
