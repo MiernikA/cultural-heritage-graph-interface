@@ -4,8 +4,6 @@
 
 ### About this project
 
-This repository contains the application developed for Adrian Miernik's master's thesis:
-
 > **Project and implementation of an exploratory interface for cultural heritage using knowledge graphs and explainable recommendations**
 >
 > Jagiellonian University in Kraków, Faculty of Physics, Astronomy and Applied Computer Science, 2026
@@ -22,10 +20,6 @@ The system consists of:
 ### Source data
 
 The source data and recommendation artifacts are **not stored in this GitHub repository**. The complete dataset is several gigabytes in size, and individual files exceed GitHub's regular file-size limit.
-
-Download the data from:
-
-<https://huggingface.co/datasets/MiernikA/cultural-heritage-graph-data>
 
 Place the following files in `backend/data/source/`:
 
@@ -102,34 +96,11 @@ export VITE_API_BASE_URL="http://127.0.0.1:8001/api"
 
 The frontend will normally be available at `http://localhost:5173`. The API address above is also the frontend's default, so setting `VITE_API_BASE_URL` can be omitted when the backend is running on port `8001`.
 
-### Optional backend configuration
-
-The default data directory can be changed with `KG_SOURCE_DATA_DIR`. Individual paths can also be configured with:
-
-- `KG_GRAPH_TSV_PATH`
-- `KG_ONTOLOGY_RDF_PATH`
-- `KG_RECOMMENDATION_ENTITY_TO_ID_PATH`
-- `KG_RECOMMENDATION_EMBEDDINGS_PATH`
-- `KG_RECOMMENDATION_INDEX_PATH`
-- `KG_CORS_ORIGINS`
-
-### Production build
-
-```powershell
-cd frontend
-npm install
-npm run build
-```
-
-The generated files will be placed in `frontend/dist/`.
-
 ---
 
 ## Polski
 
 ### O projekcie
-
-Repozytorium zawiera aplikację przygotowaną w ramach pracy magisterskiej Adriana Miernika:
 
 > **Projekt i implementacja eksploracyjnego interfejsu dla dziedzictwa kulturowego z wykorzystaniem grafów wiedzy oraz mechanizmów explainable recommendations**
 >
@@ -147,10 +118,6 @@ System składa się z:
 ### Dane źródłowe
 
 Dane źródłowe i artefakty rekomendacyjne **nie są przechowywane w tym repozytorium GitHub**. Pełny zbiór ma rozmiar kilku gigabajtów, a niektóre pojedyncze pliki przekraczają standardowy limit rozmiaru pliku w GitHub.
-
-Dane można pobrać z:
-
-<https://huggingface.co/datasets/MiernikA/cultural-heritage-graph-data>
 
 Następujące pliki należy umieścić w `backend/data/source/`:
 
@@ -226,24 +193,3 @@ export VITE_API_BASE_URL="http://127.0.0.1:8001/api"
 ```
 
 Frontend będzie zwykle dostępny pod adresem `http://localhost:5173`. Powyższy adres API jest również domyślną wartością frontendu, dlatego ustawienie `VITE_API_BASE_URL` można pominąć, jeżeli backend działa na porcie `8001`.
-
-### Opcjonalna konfiguracja backendu
-
-Domyślny katalog danych można zmienić za pomocą `KG_SOURCE_DATA_DIR`. Dostępne są również ustawienia osobnych ścieżek:
-
-- `KG_GRAPH_TSV_PATH`
-- `KG_ONTOLOGY_RDF_PATH`
-- `KG_RECOMMENDATION_ENTITY_TO_ID_PATH`
-- `KG_RECOMMENDATION_EMBEDDINGS_PATH`
-- `KG_RECOMMENDATION_INDEX_PATH`
-- `KG_CORS_ORIGINS`
-
-### Build produkcyjny
-
-```powershell
-cd frontend
-npm install
-npm run build
-```
-
-Wygenerowane pliki zostaną zapisane w `frontend/dist/`.
