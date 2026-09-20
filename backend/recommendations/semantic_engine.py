@@ -162,7 +162,7 @@ class SemanticRecommendationEngine:
                 rdf_paths_by_reason={key: _dedupe(list(value)) for key, value in paths_by_uri.get(candidate.uri, {}).items()},
             )
             for candidate in best_by_uri.values()
-            if reasons_by_uri.get(candidate.uri)
+            if any(reason != "person_or_actor" for reason in reasons_by_uri.get(candidate.uri, []))
         ]
         return _rank_recommendations(recommendations)
 
@@ -698,22 +698,12 @@ def _merge_retrieved(existing: RetrievedCandidate | None, incoming: RetrievedCan
 
 def _rank_recommendations(recommendations: list[SemanticRecommendationCandidate]) -> list[SemanticRecommendationCandidate]:
     nearest = sorted(recommendations, key=_distance_rank_key)
-    explainable = [candidate for candidate in nearest if _has_explanatory_reason(candidate)]
-    fallback_only = [candidate for candidate in nearest if not _has_explanatory_reason(candidate)]
-
-    nearest_top = [*explainable[:2], *fallback_only[: max(0, 2 - len(explainable))]]
-    nearest_uris = {candidate.uri for candidate in nearest_top}
+    nearest_uris = {candidate.uri for candidate in nearest[:2]}
     richer = sorted(
-        [candidate for candidate in explainable if candidate.uri not in nearest_uris],
+        [candidate for candidate in recommendations if candidate.uri not in nearest_uris],
         key=_semantic_rank_key,
     )
-    fallback_richer = sorted(
-        [candidate for candidate in fallback_only if candidate.uri not in nearest_uris],
-        key=_semantic_rank_key,
-    )
-    top_four = [*nearest_top, *richer[: max(0, 4 - len(nearest_top))]]
-    if len(top_four) < 4:
-        top_four.extend(fallback_richer[: 4 - len(top_four)])
+    top_four = [*nearest[:2], *richer[:2]]
     top_four_uris = {candidate.uri for candidate in top_four}
     remainder = [candidate for candidate in nearest if candidate.uri not in top_four_uris]
     return [*top_four, *remainder]
@@ -727,10 +717,6 @@ def _semantic_rank_key(candidate: SemanticRecommendationCandidate) -> tuple[int,
     explanation_reasons = [reason for reason in candidate.recommendation_reason if reason != "person_or_actor"]
     evidence_count = sum(len(paths) for reason, paths in candidate.rdf_paths_by_reason.items() if reason != "person_or_actor")
     return (-len(explanation_reasons), -evidence_count, candidate.distance, candidate.hnsw_rank, candidate.label.casefold())
-
-
-def _has_explanatory_reason(candidate: SemanticRecommendationCandidate) -> bool:
-    return any(reason != "person_or_actor" for reason in candidate.recommendation_reason)
 
 
 def _dedupe_ints(values: list[int]) -> list[int]:
