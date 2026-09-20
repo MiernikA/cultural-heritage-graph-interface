@@ -44,9 +44,8 @@ from backend.data.graph.constants import (
     TECHNICAL_TYPES,
 )
 from backend.data.semantic_catalog import TECHNICAL_LOCAL_PREFIXES, TECHNICAL_URI_TAIL_PREFIXES
-from backend.data.graph.knowledge_graph import load_graph_from_tsv
 from backend.data.label_resolver import LabelResolver
-from backend.data.ontology.loader import load_ontology, ontology_label_triples
+from backend.data.store import load_backend_data
 from backend.data.semantic_resolver import SemanticResolver
 from backend.data.text import local_class_prefix, normalize_for_search, uri_tail
 from backend.exploration.relation_resolver import RelationResolver
@@ -222,12 +221,9 @@ def main() -> int:
 
 def build_explorer_only_context() -> ExplorerService:
     settings = get_settings()
-    ontology = load_ontology(settings.ontology_rdf_path)
-    graph = load_graph_from_tsv(settings.graph_tsv_path)
-    for subject, predicate, obj in ontology_label_triples(ontology):
-        if subject not in graph.nodes:
-            graph.add_triple(subject, predicate, obj)
-    labels = LabelResolver(graph, ontology)
+    data = load_backend_data(settings)
+    graph = data.graph
+    labels = LabelResolver(graph, data.ontology)
     resolved_labels = labels.all_resolved_labels()
     graph.build_placeholder_aliases(resolved_labels)
     graph.build_search_index(resolved_labels)

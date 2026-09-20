@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import statistics
 import sys
 import time
@@ -32,7 +33,7 @@ from backend.recommendations.similarity import query_similar
 
 
 DEFAULT_SAMPLE_SIZE = 1000
-DEFAULT_SEED = 20260903
+DEFAULT_SEED = 20260912
 TOP_N_FOR_RANKING = 10
 SCHEMA_URI_PREFIXES = (
     CIDOC,
@@ -115,7 +116,8 @@ def main() -> int:
             }
         )
 
-    summary = build_summary(entity_rows, recommendation_rows, source_type_rows, errors, args, started)
+    potential_recommendable_count = sum(1 for source in all_sources if source.has_embedding)
+    summary = build_summary(entity_rows, recommendation_rows, source_type_rows, errors, args, started, potential_recommendable_count)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     per_entity_csv = output_dir / f"recommendations_per_entity_{timestamp}.csv"
@@ -123,6 +125,8 @@ def main() -> int:
     funnel_csv = output_dir / f"recommendations_candidate_funnel_{timestamp}.csv"
     type_distribution_csv = output_dir / f"recommendations_type_distribution_{timestamp}.csv"
     source_target_type_csv = output_dir / f"recommendations_source_to_target_types_{timestamp}.csv"
+    explanation_csv = output_dir / f"recommendations_explanation_coverage_{timestamp}.csv"
+    rejection_csv = output_dir / f"recommendations_rejection_reasons_{timestamp}.csv"
     summary_json = output_dir / f"recommendations_validation_summary_{timestamp}.json"
     summary["files"] = {
         "per_source_entity_csv": str(per_entity_csv),
@@ -130,6 +134,8 @@ def main() -> int:
         "candidate_funnel_csv": str(funnel_csv),
         "type_distribution_csv": str(type_distribution_csv),
         "source_to_recommended_type_csv": str(source_target_type_csv),
+        "explanation_coverage_csv": str(explanation_csv),
+        "rejection_reasons_csv": str(rejection_csv),
         "summary_json": str(summary_json),
     }
 
@@ -138,6 +144,8 @@ def main() -> int:
     write_csv(funnel_csv, summary["candidate_funnel"], funnel_fieldnames())
     write_csv(type_distribution_csv, summary["recommendation_type_distribution"], type_distribution_fieldnames())
     write_csv(source_target_type_csv, summary["source_to_recommended_type_distribution"], source_target_fieldnames())
+    write_csv(explanation_csv, summary["explanation_coverage_rows"], explanation_fieldnames())
+    write_csv(rejection_csv, summary["rejection_reason_rows"], rejection_fieldnames())
     summary_json.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print_report(summary, per_entity_csv, per_recommendation_csv, funnel_csv, type_distribution_csv, source_target_type_csv, summary_json)
@@ -321,6 +329,11 @@ def trace_recommendation_pipeline(source: SourceEntity, service: Any, candidate_
                 "non_filter_reason_count": len(non_filter_reasons),
                 "semantic_reasons": "|".join(semantic_candidate.recommendation_reason),
                 "evidence_path_count": evidence_path_count,
+                "explanation_evidence_count": len(recommendation.explanation.evidence) if recommendation.explanation else 0,
+                "explanation_rdf_step_count": sum(len(evidence.rdf_path) for evidence in recommendation.explanation.evidence) if recommendation.explanation else 0,
+                "has_presented_rdf_evidence": bool(recommendation.explanation and any(evidence.rdf_path for evidence in recommendation.explanation.evidence)),
+                "filter_only_semantic_reason": semantic_candidate.recommendation_reason == ["person_or_actor"],
+                "has_only_embedding_explanation": bool(recommendation.reasons) and all(reason.type == "embedding_similarity" for reason in recommendation.reasons),
                 "reason_tags": "|".join(recommendation.reason_tags),
             }
         )
@@ -426,6 +439,7 @@ def build_summary(
     errors: list[dict[str, Any]],
     args: Any,
     started: float,
+    potential_recommendable_count: int,
 ) -> dict[str, Any]:
     total = len(entity_rows)
     with_embedding = sum(1 for row in entity_rows if row["has_embedding"])
@@ -449,6 +463,11 @@ def build_summary(
 
     type_counter = Counter(row["recommendation_semantic_type"] for row in recommendation_rows)
     source_target_counter = Counter((row["source_semantic_type"], row["recommendation_semantic_type"]) for row in recommendation_rows)
+    unique_targets = {row["recommendation_uri"] for row in recommendation_rows}
+    type_total = len(recommendation_rows)
+    type_shares = sorted((row["percentage"] for row in distribution_rows(type_counter, type_total, "semantic_type")), reverse=True)
+    explanation_rows = explanation_coverage_rows(recommendation_rows)
+    rejection_rows = rejection_reason_rows(entity_rows)
     technical_rejections = {
         "self_embedding_removed": sum_int(entity_rows, "self_embedding_removed"),
         "missing_metadata_removed": sum_int(entity_rows, "missing_metadata_removed"),
@@ -514,12 +533,30 @@ def build_summary(
             "min": min(counts) if counts else 0,
             "mean": round(statistics.mean(counts), 4) if counts else 0.0,
             "median": round(statistics.median(counts), 4) if counts else 0.0,
+            "p5": percentile(counts, 5),
+            "p25": percentile(counts, 25),
+            "p75": percentile(counts, 75),
             "p95": percentile(counts, 95),
             "max": max(counts) if counts else 0,
             "buckets": recommendation_count_buckets(counts),
         },
         "recommendation_type_distribution": distribution_rows(type_counter, len(recommendation_rows), "semantic_type"),
         "source_to_recommended_type_distribution": source_target_rows(source_target_counter, len(recommendation_rows)),
+        "recommendation_space_coverage": {
+            "unique_recommended_target_entities": len(unique_targets),
+            "potential_recommendable_entities": potential_recommendable_count,
+            "unique_target_share_of_potential_percent": percent(len(unique_targets), potential_recommendable_count),
+            "definition": "Potential recommendable entities are all canonical displayable entities in the loaded graph with at least one embedding id.",
+        },
+        "recommendation_type_concentration": {
+            "largest_type_share_percent": type_shares[0] if type_shares else 0.0,
+            "top3_type_share_percent": round(sum(type_shares[:3]), 4),
+            "semantic_type_count": len(type_counter),
+            "entropy_bits": entropy_bits(type_counter),
+        },
+        "explanation_coverage": explanation_summary_from_rows(explanation_rows),
+        "explanation_coverage_rows": explanation_rows,
+        "rejection_reason_rows": rejection_rows,
         "technical_filtering": technical_rejections,
         "semantic_filtering": semantic_filtering,
         "ranking": ranking,
@@ -547,6 +584,101 @@ def funnel_rows(counts: dict[str, int]) -> list[dict[str, Any]]:
         )
         previous = count
     return rows
+
+
+def explanation_coverage_rows(recommendation_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    total = len(recommendation_rows)
+    categories = [
+        (
+            "has_presented_rdf_evidence",
+            sum(1 for row in recommendation_rows if truthy(row.get("has_presented_rdf_evidence"))),
+            "Final recommendation has at least one RDF path step in RecommendationExplanation.evidence.",
+        ),
+        (
+            "filter_only_person_or_actor_or_embedding",
+            sum(1 for row in recommendation_rows if truthy(row.get("filter_only_semantic_reason")) or truthy(row.get("has_only_embedding_explanation"))),
+            "Semantic candidate was supported only by person_or_actor, which RecommendationService omits from displayed reasons, leaving embedding_similarity.",
+        ),
+        (
+            "without_presented_rdf_evidence",
+            sum(1 for row in recommendation_rows if not truthy(row.get("has_presented_rdf_evidence"))),
+            "Final recommendation has no explicit RDF path in the presented RecommendationExplanation.evidence.",
+        ),
+    ]
+    return [
+        {
+            "category": category,
+            "count": count,
+            "percentage": percent(count, total),
+            "definition": definition,
+        }
+        for category, count, definition in categories
+    ]
+
+
+def explanation_summary_from_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    return {row["category"]: {"count": row["count"], "percentage": row["percentage"]} for row in rows}
+
+
+def rejection_reason_rows(entity_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = [
+        (
+            "self_embedding_removed",
+            sum_int(entity_rows, "self_embedding_removed"),
+            "HNSW neighbor embedding id belongs to the source entity and is removed before candidate URI handling.",
+        ),
+        (
+            "missing_metadata_removed",
+            sum_int(entity_rows, "missing_metadata_removed"),
+            "HNSW neighbor id is absent from embedding_metadata and is removed with the source/self filtering step.",
+        ),
+        (
+            "invalid_uri_removed",
+            sum_int(entity_rows, "invalid_uri_removed"),
+            "Candidate metadata canonicalizes to a value that does not start with http.",
+        ),
+        (
+            "source_entity_after_canonicalization_removed",
+            sum_int(entity_rows, "source_entity_removed"),
+            "Candidate URI canonicalizes to the currently viewed source URI.",
+        ),
+        (
+            "duplicate_after_canonicalization_removed",
+            sum_int(entity_rows, "duplicate_after_canonicalization_removed"),
+            "Multiple embedding candidates map to the same canonical URI; the lower-distance candidate is retained.",
+        ),
+        (
+            "no_semantic_reason",
+            sum_int(entity_rows, "no_semantic_reason"),
+            "Candidate entered recommend_with_semantic_filters but matched no implemented semantic recommendation reason.",
+        ),
+        (
+            "final_filter_rejected",
+            sum_int(entity_rows, "final_filter_rejected"),
+            "Semantic candidate did not pass RecommendationFilter.build_recommendation_for_uri.",
+        ),
+    ]
+    total = sum(count for _category, count, _definition in rows)
+    result = [
+        {
+            "category": category,
+            "count": count,
+            "percentage": percent(count, total),
+            "definition": definition,
+        }
+        for category, count, definition in rows
+    ]
+    final_filter_reasons = aggregate_reason_pairs(entity_rows, "final_filter_rejection_reasons")
+    for category, count in sorted(final_filter_reasons.items()):
+        result.append(
+            {
+                "category": f"final_filter_{category}",
+                "count": count,
+                "percentage": percent(count, total),
+                "definition": "Subcategory returned by classify_final_filter_rejection for final RecommendationFilter rejection.",
+            }
+        )
+    return result
 
 
 def select_examples(entity_rows: list[dict[str, Any]], recommendation_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -652,6 +784,23 @@ def percentile(values: list[int], pct: int) -> float:
     return float(ordered[index])
 
 
+def entropy_bits(counter: Counter[str]) -> float:
+    total = sum(counter.values())
+    if not total:
+        return 0.0
+    entropy = 0.0
+    for count in counter.values():
+        probability = count / total
+        entropy -= probability * math.log2(probability)
+    return round(entropy, 6)
+
+
+def truthy(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.lower() in {"true", "1", "yes"}
+    return bool(value)
+
+
 def sum_int(rows: list[dict[str, Any]], field: str) -> int:
     return sum(int(row.get(field, 0) or 0) for row in rows)
 
@@ -719,6 +868,11 @@ def recommendation_fieldnames() -> tuple[str, ...]:
         "non_filter_reason_count",
         "semantic_reasons",
         "evidence_path_count",
+        "explanation_evidence_count",
+        "explanation_rdf_step_count",
+        "has_presented_rdf_evidence",
+        "filter_only_semantic_reason",
+        "has_only_embedding_explanation",
         "reason_tags",
     )
 
@@ -733,6 +887,14 @@ def type_distribution_fieldnames() -> tuple[str, ...]:
 
 def source_target_fieldnames() -> tuple[str, ...]:
     return ("source_semantic_type", "recommendation_semantic_type", "count", "percentage")
+
+
+def explanation_fieldnames() -> tuple[str, ...]:
+    return ("category", "count", "percentage", "definition")
+
+
+def rejection_fieldnames() -> tuple[str, ...]:
+    return ("category", "count", "percentage", "definition")
 
 
 def print_report(
